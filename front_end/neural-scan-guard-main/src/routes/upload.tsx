@@ -55,32 +55,78 @@ function UploadPage() {
       setPreview(null);
     }
   }, []);
+ const delay = (ms: number) =>
+  new Promise(resolve => setTimeout(resolve, ms));
 
-  const analyze = () => {
-    if (!file) return;
-    setStage("uploading");
+ const analyze = async () => {
+  if (!file) return;
+
+  setStage("uploading");
+  setStep(0);
+
+  setStage("analyzing");
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("http://127.0.0.1:8000/predict", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to analyze image");
+    }
+
+    const data = await response.json();
+
+    console.log("API Response:", data);
+
+
     setStep(0);
-    setTimeout(() => setStage("analyzing"), 700);
+    await delay(800);
 
-    let i = 0;
-    const iv = setInterval(() => {
-      i++;
-      setStep(i);
-      if (i >= stages.length) {
-        clearInterval(iv);
-        const outcomes: Result[] = [
-          { prediction: "Tumor Detected", type: "Glioma", confidence: 95.7, location: "Left temporal lobe", size: "2.4 cm" },
-          { prediction: "Tumor Detected", type: "Meningioma", confidence: 92.3, location: "Right frontal", size: "1.8 cm" },
-          { prediction: "Tumor Detected", type: "Pituitary", confidence: 89.1, location: "Sella turcica", size: "1.1 cm" },
-          { prediction: "Healthy", type: "Healthy", confidence: 98.4 },
-        ];
-        const r = outcomes[Math.floor(Math.random() * outcomes.length)];
-        setResult(r);
-        setStage("done");
-        toast.success("Analysis complete", { description: `${r.type} · ${r.confidence.toFixed(1)}% confidence` });
-      }
-    }, 900);
-  };
+    setStep(1);
+    await delay(800);
+
+    setStep(2);
+    await delay(800);
+
+    setStep(3);
+    await delay(800);
+
+// بعد ما يخلص الأنيميشن اعرض النتيجة
+setResult({
+  prediction: data.is_tumor ? "Tumor Detected" : "Healthy",
+  type: data.display_name,
+  confidence: data.confidence_pct ?? data.confidence * 100,
+  location: data.location || "",
+  size: data.size || "",
+});
+
+setStep(stages.length);
+setStage("done");
+
+toast.success("Analysis complete", {
+  description: `${data.display_name} · ${(
+    data.confidence_pct ?? data.confidence * 100
+  ).toFixed(1)}% confidence`,
+});
+   toast.success("Analysis complete", {
+   description: `${data.display_name} · ${data.confidence.toFixed(1)}% confidence`,
+   });
+
+  } catch (error) {
+    console.error(error);
+
+    toast.error("Analysis failed", {
+      description: "Could not connect to the AI server.",
+    });
+
+    setStage("idle");
+  }
+};
 
   const reset = () => {
     setFile(null);

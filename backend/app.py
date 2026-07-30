@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
 # ─────────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Brain Tumor Detection API",
-    description="Classifies brain MRI scans: Glioma · Meningioma · Pituitary Tumor",
+    description="Classifies brain MRI scans: Glioma · Meningioma · Pituitary Tumor · No Tumor",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -98,14 +98,14 @@ async def predict(file: UploadFile = File(..., description="Brain MRI image (JPE
 
     Returns JSON:
     {
-        "prediction":     "glioma",
-        "display_name":   "Glioma",
+        "prediction": "glioma" | "meningioma" | "pituitary" | "notumor",
+        "display_name": "Glioma" | "Meningioma" | "Pituitary Tumor" | "No Tumor",
         "arabic_name":    "ورم دبقي (Glioma)",
         "confidence":     0.9823,
         "confidence_pct": 98.23,
-        "is_tumor":       true,
-        "severity":       "high",
-        "per_class":      { "glioma": 98.23, "meningioma": 1.12, "pituitary": 0.65 },
+        "is_tumor": true | false,
+        "severity": "high" | "medium" | "none",
+        "per_class": {"glioma": 1.25, "meningioma": 3.15, "notumor": 94.10, "pituitary": 1.50},
         "image_info":     { "filename": "scan.jpg", "original_size": [512, 512] },
         "processing_time_ms": 145
     }
@@ -147,7 +147,7 @@ async def predict(file: UploadFile = File(..., description="Brain MRI image (JPE
         "image_info": {
             "filename":         file.filename or "unknown",
             "original_size":    list(orig_size),
-            "model_input_size": utils.IMG_SIZE,
+            "model_input_size": list(utils.IMG_SIZE),
         },
         "processing_time_ms": elapsed_ms,
     })

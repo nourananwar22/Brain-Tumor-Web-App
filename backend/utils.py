@@ -1,10 +1,11 @@
 """
-utils.py - Image preprocessing for Brain Tumor Detection API.
+utils.py - Image validation & preprocessing helpers for the Brain Tumor API.
 
-EfficientNet-B2 expects:
-  - Input size: 260 x 260 pixels
-  - Raw RGB values in [0, 255] (no divide by 255)
-  - Shape: (1, 260, 260, 3) float32
+The model (Xception backbone) expects:
+    - RGB images
+    - resized to 299x299
+    - pixel values scaled the way Xception's preprocess_input does it
+      (scaled to the range [-1, 1]), NOT simple /255 normalization.
 """
 from __future__ import annotations
 
@@ -12,66 +13,54 @@ import io
 from typing import Tuple
 
 import numpy as np
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
-IMG_SIZE = 224          # EfficientNet-B2 native resolution
-MAX_BYTES = 20 * 1024 * 1024   # 20 MB upload cap
+from model import IMG_SIZE  # (299, 299) — keep in sync with model.py
 
-
-def preprocess_bytes(raw_bytes: bytes, img_size: int = IMG_SIZE) -> Tuple[np.ndarray, Tuple[int, int]]:
-    """
-    Decode image bytes → float32 numpy batch (1, 260, 260, 3).
-
-    Returns
-    -------
-    batch      : shape (1, img_size, img_size, 3), dtype float32, range [0, 255]
-    orig_size  : (width, height) of the original image
-    """
-    if len(raw_bytes) > MAX_BYTES:
-        raise ValueError(
-            f"Image too large ({len(raw_bytes) / 1_048_576:.1f} MB). Max: {MAX_BYTES // 1_048_576} MB."
-        )
-
-    try:
-        pil_img = Image.open(io.BytesIO(raw_bytes))
-    except (UnidentifiedImageError, Exception) as exc:
-        raise ValueError(f"Cannot decode image: {exc}") from exc
-
-    orig_size = pil_img.size  # (width, height)
-
-    if min(orig_size) < 32:
-        raise ValueError(f"Image too small ({orig_size[0]}x{orig_size[1]} px). Min: 32 px.")
-
-    # Convert to RGB (handles grayscale, RGBA, palette images, etc.)
-    pil_img = pil_img.convert("RGB")
-
-    # Resize to model's native resolution
-    resized = pil_img.resize((img_size, img_size), Image.LANCZOS)
-
-    # Build batch: (1, H, W, 3) float32 in [0, 255]
-    arr = np.asarray(resized, dtype=np.float32)
-    batch = arr[np.newaxis, ...]
-
-    return batch, orig_size
+ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/bmp", "image/webp"}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def validate_image_format(content_type: str | None, filename: str | None) -> None:
-    """Raise ValueError if the uploaded file is not an accepted image format."""
-    ALLOWED_MIME = {
-        "image/jpeg", "image/jpg", "image/png",
-        "image/bmp", "image/tiff", "image/webp",
-    }
-    ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+    """Raise ValueError if the uploaded file doesn't look like a supported image."""
+    ok_type = bool(content_type) and content_type.lower() in ALLOWED_CONTENT_TYPES
+    ok_ext = bool(filename) and any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
 
-    if content_type and content_type.lower().split(";")[0].strip() not in ALLOWED_MIME:
+    if not (ok_type or ok_ext):
         raise ValueError(
-            f"Unsupported file type: '{content_type}'. Accepted: JPEG, PNG, BMP, TIFF, WebP."
+            f"Unsupported file type (content_type={content_type!r}, filename={filename!r}). "
+            "Please upload a JPEG, PNG, BMP, or WEBP image."
         )
 
-    if filename:
-        import pathlib
-        ext = pathlib.Path(filename).suffix.lower()
-        if ext and ext not in ALLOWED_EXT:
-            raise ValueError(
-                f"Unsupported extension: '{ext}'. Accepted: {', '.join(sorted(ALLOWED_EXT))}."
-            )
+
+def preprocess_bytes(raw_bytes: bytes) -> Tuple[np.ndarray, Tuple[int, int]]:
+    """
+    Convert raw uploaded image bytes into a model-ready batch.
+
+    Returns
+    -------
+    batch      : float32 numpy array of shape (1, 299, 299, 3), scaled to [-1, 1]
+    orig_size  : (width, height) of the original uploaded image
+    """
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.load()
+    except Exception as exc:
+        raise ValueError(f"Could not read image file: {exc}") from exc
+
+    orig_size = img.size  # (width, height)
+
+    # Ensure 3-channel RGB (handles grayscale MRIs, RGBA PNGs, etc.)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    img = img.resize(IMG_SIZE, Image.BILINEAR)
+
+    arr = np.asarray(img).astype("float32")  # (299, 299, 3), values 0-255
+
+    # Xception preprocess_input: scale to [-1, 1]
+    arr = (arr / 127.5) - 1.0
+
+    batch = np.expand_dims(arr, axis=0)  # (1, 299, 299, 3)
+
+    return batch, orig_size
