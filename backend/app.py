@@ -67,6 +67,7 @@ app.add_middleware(
         "http://127.0.0.1:8083",
         "https://preview--neural-scan-guard.lovable.app",
         "https://neural-scan-guard.lovable.app",
+        "https://brain-tumor-web-app-production.up.railway.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
