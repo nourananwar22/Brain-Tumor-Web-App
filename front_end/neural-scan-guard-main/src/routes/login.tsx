@@ -38,9 +38,16 @@ function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/40 px-4 py-10">
-      <div className="absolute inset-0 -z-10 opacity-[0.04] pointer-events-none"
-           style={{ backgroundImage: "radial-gradient(circle at 20% 20%, var(--color-primary) 0, transparent 40%), radial-gradient(circle at 80% 80%, var(--color-chart-2) 0, transparent 40%)" }} />
+    <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden px-4 py-10">
+      {/* Blurred MRI background image */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div
+          className="absolute inset-0 bg-cover bg-center scale-110 blur-[6px]"
+          style={{ backgroundImage: "url('/mri-bg.jpg')" }}
+        />
+        {/* overlay خفيف عشان الصورة تبان وفي نفس الوقت الكارد يفضل مقروء */}
+        <div className="absolute inset-0 bg-background/30" />
+      </div>
 
       <div className="w-full max-w-md">
         {/* Brand */}
@@ -49,13 +56,13 @@ function LoginPage() {
             <Brain className="h-7 w-7 text-primary-foreground" />
           </div>
           <h1 className="font-display text-2xl font-bold text-foreground">NeuroScan</h1>
-          <p className="text-xs uppercase tracking-widest text-muted-foreground mt-1">
+          <p className="text-xs uppercase tracking-widest text-Black mt-1">
             MRI Analysis Platform
           </p>
         </div>
 
-        {/* Card */}
-        <div className="rounded-2xl border border-border bg-card p-8 shadow-elegant">
+        {/* Card - glassmorphism */}
+        <div className="rounded-2xl border border-border/60 bg-card/70 backdrop-blur-xl p-8 shadow-elegant">
           <div className="mb-6">
             <h2 className="font-display text-xl font-semibold text-foreground">Doctor Login</h2>
             <p className="text-sm text-muted-foreground mt-1">
@@ -80,7 +87,7 @@ function LoginPage() {
                   required
                   disabled={loading}
                   placeholder="doctor"
-                  className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition disabled:opacity-60"
+                  className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background/80 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition disabled:opacity-60"
                 />
               </div>
             </div>
@@ -101,7 +108,7 @@ function LoginPage() {
                   required
                   disabled={loading}
                   placeholder="••••••••"
-                  className="w-full h-10 pl-9 pr-10 rounded-lg border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition disabled:opacity-60"
+                  className="w-full h-10 pl-9 pr-10 rounded-lg border border-input bg-background/80 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition disabled:opacity-60"
                 />
                 <button
                   type="button"
@@ -155,18 +162,9 @@ function LoginPage() {
               )}
             </button>
           </form>
-
-          <div className="mt-6 pt-4 border-t border-border space-y-1">
-            <p className="text-[11px] text-center text-muted-foreground">
-              Doctor: <span className="font-mono text-foreground">doctor</span> / <span className="font-mono text-foreground">123456</span>
-            </p>
-            <p className="text-[11px] text-center text-muted-foreground">
-              Head of Department: <span className="font-mono text-foreground">head</span> / <span className="font-mono text-foreground">123456</span>
-            </p>
-          </div>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-6">
+        <p className="text-center text-xs text-white mt-6">
           © {new Date().getFullYear()} NeuroScan Medical · HIPAA compliant
         </p>
       </div>

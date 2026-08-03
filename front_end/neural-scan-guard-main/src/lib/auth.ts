@@ -1,7 +1,8 @@
-// Modular auth service — swap the internals for a real API later
-// without changing the UI. Public surface: login/logout/isAuthenticated/getUser/subscribe.
+// Modular auth service — now backed by the real /login endpoint in app.py.
+// Public surface unchanged: login/logout/isAuthenticated/getUser/subscribe.
 
 const STORAGE_KEY = "neuroscan_auth";
+const API_BASE = "http://127.0.0.1:8000";
 
 export type Role = "doctor" | "head";
 
@@ -9,8 +10,10 @@ export interface AuthUser {
   username: string;
   displayName: string;
   role: Role;
-  /** Full physician name as it appears in patient records. Only for role="doctor". */
+  /** Full physician name as it appears in patient records. */
   physicianName?: string;
+  /** Real DoctorID from MindScanDB — used to filter patients/diagnoses. */
+  doctorId?: number;
 }
 
 interface StoredAuth {
@@ -18,55 +21,6 @@ interface StoredAuth {
   loggedInAt: number;
   remember: boolean;
 }
-
-// Registered accounts (frontend-only demo). Passwords are hardcoded for demo.
-interface Account {
-  username: string;
-  password: string;
-  user: AuthUser;
-}
-
-const ACCOUNTS: Account[] = [
-  {
-    username: "doctor",
-    password: "123456",
-    user: {
-      username: "doctor",
-      displayName: "Dr. R. Okafor",
-      role: "doctor",
-      physicianName: "Dr. R. Okafor",
-    },
-  },
-  {
-    username: "nakamura",
-    password: "123456",
-    user: {
-      username: "nakamura",
-      displayName: "Dr. L. Nakamura",
-      role: "doctor",
-      physicianName: "Dr. L. Nakamura",
-    },
-  },
-  {
-    username: "bianchi",
-    password: "123456",
-    user: {
-      username: "bianchi",
-      displayName: "Dr. E. Bianchi",
-      role: "doctor",
-      physicianName: "Dr. E. Bianchi",
-    },
-  },
-  {
-    username: "head",
-    password: "123456",
-    user: {
-      username: "head",
-      displayName: "Dr. M. Ibrahim",
-      role: "head",
-    },
-  },
-];
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -122,17 +76,32 @@ export async function login(
   password: string,
   remember = false,
 ): Promise<AuthUser> {
-  await new Promise((r) => setTimeout(r, 400));
+  const formData = new FormData();
+  formData.append("username", username.trim());
+  formData.append("password", password);
 
-  const account = ACCOUNTS.find(
-    (a) => a.username === username.trim().toLowerCase(),
-  );
-  if (!account || account.password !== password) {
-    throw new Error("Invalid username or password.");
+  const response = await fetch(`${API_BASE}/login`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.detail?.message || "Invalid username or password.");
   }
 
-  persist({ user: account.user, loggedInAt: Date.now(), remember });
-  return account.user;
+  const data = await response.json();
+
+  const user: AuthUser = {
+    username: data.username,
+    displayName: data.display_name,
+    role: data.role,
+    physicianName: data.physician_name,
+    doctorId: data.doctor_id,
+  };
+
+  persist({ user, loggedInAt: Date.now(), remember });
+  return user;
 }
 
 export function logout(): void {

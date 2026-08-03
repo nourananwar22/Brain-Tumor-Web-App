@@ -1,12 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Search, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import {
-  departmentDoctors,
-  diagnosisTone,
-  getVisiblePatients,
-} from "@/lib/mock-data";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/patients")({
@@ -22,19 +17,59 @@ function PatientsPage() {
   const [q, setQ] = useState("");
   const [f, setF] = useState<(typeof filters)[number]>("All");
   const [doctorFilter, setDoctorFilter] = useState<string>("All");
+  const [patients, setPatients] = useState<any[]>([]);
 
-  const scoped = useMemo(
-    () => getVisiblePatients(user, isHead ? doctorFilter : null),
-    [user, isHead, doctorFilter],
+  useEffect(() => {
+    const url =
+      isHead || !user?.doctorId
+        ? "http://127.0.0.1:8000/patients"
+        : `http://127.0.0.1:8000/patients?doctor_id=${user.doctorId}`;
+
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => {
+        setPatients(data);
+      })
+      .catch((err) => {
+        console.error(err);
+      });
+  }, [isHead, user?.doctorId]);
+
+  // Build the doctor filter list from real data returned by the API
+  const departmentDoctors = useMemo(
+    () =>
+      Array.from(new Set(patients.map((p: any) => p.DoctorName).filter(Boolean))).sort(),
+    [patients],
   );
 
   const rows = useMemo(() => {
-    return scoped.filter((p) => {
-      if (f !== "All" && p.diagnosis !== f) return false;
-      if (q && !`${p.name} ${p.id}`.toLowerCase().includes(q.toLowerCase())) return false;
+    return patients.filter((p: any) => {
+      // Diagnosis type filter
+      if (f !== "All") {
+        if (f === "Healthy") {
+          if (p.TumorType && p.TumorType !== "Healthy") return false;
+        } else if (p.TumorType !== f) {
+          return false;
+        }
+      }
+
+      // Doctor filter (head-of-department view only)
+      if (isHead && doctorFilter !== "All" && p.DoctorName !== doctorFilter) {
+        return false;
+      }
+
+      // Search by name or ID
+      const fullName = `${p.FirstName ?? ""} ${p.LastName ?? ""}`;
+      if (
+        q &&
+        !`${fullName} ${p.PatientID}`.toLowerCase().includes(q.toLowerCase())
+      ) {
+        return false;
+      }
+
       return true;
     });
-  }, [scoped, q, f]);
+  }, [patients, f, isHead, doctorFilter, q]);
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto">
@@ -124,39 +159,63 @@ function PatientsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {rows.map((p) => (
-                <tr key={p.id} className="hover:bg-muted/40 transition group">
+              {rows.map((p: any, idx: number) => (
+                <tr key={`${p.PatientID}-${p.DiagnosisDate}-${idx}`} className="hover:bg-muted/40 transition group">
                   <td className="px-6 py-3.5">
                     <div className="flex items-center gap-3">
                       <div className="h-9 w-9 rounded-full gradient-primary grid place-items-center text-primary-foreground text-xs font-semibold shrink-0">
-                        {p.name.split(" ").map((n) => n[0]).join("")}
+                        {`${p.FirstName?.[0] || ""}${p.LastName?.[0] || ""}`}
                       </div>
+
                       <div className="min-w-0">
-                        <p className="font-medium truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{p.age}y · {p.sex}</p>
+                        <p className="font-medium truncate">
+                          {p.FirstName} {p.LastName}
+                        </p>
+
+                        <p className="text-xs text-muted-foreground">
+                          {p.Age}y · {p.Gender}
+                        </p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">{p.id}</td>
-                  <td className="px-4 py-3.5 text-muted-foreground hidden md:table-cell">{p.scanDate}</td>
+
+                  <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">
+                    {p.PatientID}
+                  </td>
+
+                  <td className="px-4 py-3.5 text-muted-foreground hidden md:table-cell">
+                    {p.DiagnosisDate}
+                  </td>
+
                   <td className="px-4 py-3.5">
-                    <span className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-full border ${diagnosisTone(p.diagnosis)}`}>
-                      {p.diagnosis}
+                    <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full border">
+                      {p.TumorType}
                     </span>
                   </td>
+
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full gradient-primary" style={{ width: `${p.confidence}%` }} />
+                        <div
+                          className="h-full gradient-primary"
+                          style={{ width: `${p.ConfidenceScore}%` }}
+                        />
                       </div>
-                      <span className="font-mono text-xs">{p.confidence.toFixed(1)}%</span>
+
+                      <span className="font-mono text-xs">
+                        {Number(p.ConfidenceScore).toFixed(1)}%
+                      </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3.5 text-muted-foreground hidden lg:table-cell">{p.physician}</td>
+
+                  <td className="px-4 py-3.5 text-muted-foreground hidden lg:table-cell">
+                    {p.DoctorName}
+                  </td>
+
                   <td className="px-4 py-3.5 text-right">
                     <Link
                       to="/patients/$id"
-                      params={{ id: p.id }}
+                      params={{ id: String(p.PatientID) }}
                       className="inline-flex items-center gap-1 text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition"
                     >
                       Report
@@ -176,7 +235,7 @@ function PatientsPage() {
           </table>
         </div>
         <div className="px-6 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-          <span>Showing {rows.length} of {scoped.length} records</span>
+          <span>Showing {rows.length} records</span>
           <span>Updated 2 minutes ago</span>
         </div>
       </div>

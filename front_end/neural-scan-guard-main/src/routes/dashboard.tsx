@@ -28,18 +28,18 @@ import {
   YAxis,
 } from "recharts";
 import { PageHeader } from "@/components/page-header";
-import {
-  departmentDoctors,
-  diagnosisBreakdown,
-  diagnosisTone,
-  getDoctorStats,
-  getVisiblePatients,
-  scanVolume,
-} from "@/lib/mock-data";
+import { diagnosisTone } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
 });
+
+const DIAGNOSIS_COLORS: Record<string, string> = {
+  Healthy: "var(--color-chart-3, #22c55e)",
+  glioma: "var(--color-chart-1, #0ea5e9)",
+  meningioma: "var(--color-chart-2, #14b8a6)",
+  pituitary: "var(--color-chart-4, #6366f1)",
+};
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -51,33 +51,109 @@ function Dashboard() {
 
   const isHead = user?.role === "head";
   const [doctorFilter, setDoctorFilter] = useState<string>("All");
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const visible = useMemo(
-    () => getVisiblePatients(user, isHead ? doctorFilter : null),
-    [user, isHead, doctorFilter],
+  useEffect(() => {
+    const url =
+      isHead || !user?.doctorId
+        ? "http://127.0.0.1:8000/patients"
+        : `http://127.0.0.1:8000/patients?doctor_id=${user.doctorId}`;
+
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => setRows(Array.isArray(data) ? data : []))
+      .catch((err) => console.error(err))
+      .finally(() => setLoading(false));
+  }, [isHead, user?.doctorId]);
+
+  // All doctor names present in the data, for the filter dropdown
+  const departmentDoctors = useMemo(
+    () => Array.from(new Set(rows.map((r) => r.DoctorName).filter(Boolean))),
+    [rows],
   );
 
-  const positiveCount = visible.filter((p) => p.diagnosis !== "Healthy").length;
+  // Scope rows: head sees everyone (optionally filtered by dropdown),
+  // a regular doctor's `rows` already comes pre-scoped from the backend.
+  const visible = useMemo(() => {
+    if (isHead) {
+      return doctorFilter === "All" ? rows : rows.filter((r) => r.DoctorName === doctorFilter);
+    }
+    return rows;
+  }, [rows, isHead, doctorFilter]);
+
+  const positiveCount = visible.filter((p) => p.TumorType && p.TumorType !== "Healthy").length;
   const avgConfidence =
     visible.length === 0
       ? 0
-      : visible.reduce((s, p) => s + p.confidence, 0) / visible.length;
+      : visible.reduce((s, p) => s + (Number(p.ConfidenceScore) || 0), 0) / visible.length;
 
   const stats = isHead
     ? [
-        { label: "Total Scans (Dept.)", value: "12,847", delta: "+8.2%", icon: ScanLine, tone: "text-primary" },
-        { label: "Active Doctors", value: String(departmentDoctors.length), delta: "+1", icon: Users, tone: "text-chart-2" },
-        { label: "Tumors Detected", value: "716", delta: "+3.1%", icon: Brain, tone: "text-destructive" },
-        { label: "Model Accuracy", value: "97.8%", delta: "+0.4%", icon: TrendingUp, tone: "text-success" },
+        { label: "Total Scans (Dept.)", value: String(rows.length), delta: "", icon: ScanLine, tone: "text-primary" },
+        { label: "Active Doctors", value: String(departmentDoctors.length), delta: "", icon: Users, tone: "text-chart-2" },
+        { label: "Tumors Detected", value: String(rows.filter((p) => p.TumorType && p.TumorType !== "Healthy").length), delta: "", icon: Brain, tone: "text-destructive" },
+        {
+          label: "Avg Confidence",
+          value: rows.length ? `${(rows.reduce((s, p) => s + (Number(p.ConfidenceScore) || 0), 0) / rows.length).toFixed(1)}%` : "0%",
+          delta: "",
+          icon: TrendingUp,
+          tone: "text-success",
+        },
       ]
     : [
-        { label: "My Scans", value: String(visible.length), delta: "+2 this week", icon: ScanLine, tone: "text-primary" },
-        { label: "My Patients", value: String(new Set(visible.map((p) => p.id)).size), delta: "Active caseload", icon: Users, tone: "text-chart-2" },
+        { label: "My Scans", value: String(visible.length), delta: "", icon: ScanLine, tone: "text-primary" },
+        { label: "My Patients", value: String(new Set(visible.map((p) => p.PatientID)).size), delta: "Active caseload", icon: Users, tone: "text-chart-2" },
         { label: "Tumors Detected", value: String(positiveCount), delta: `${visible.length - positiveCount} healthy`, icon: Brain, tone: "text-destructive" },
         { label: "Avg Confidence", value: `${avgConfidence.toFixed(1)}%`, delta: "Your cases", icon: TrendingUp, tone: "text-success" },
       ];
 
-  const doctorStats = useMemo(() => getDoctorStats(), []);
+  // Team performance: cases + positives per doctor, built from real rows (head-only, department-wide)
+  const doctorStats = useMemo(() => {
+    const map = new Map<string, { physician: string; total: number; positive: number; confidenceSum: number }>();
+    for (const r of rows) {
+      const name = r.DoctorName || "Unassigned";
+      if (!map.has(name)) map.set(name, { physician: name, total: 0, positive: 0, confidenceSum: 0 });
+      const entry = map.get(name)!;
+      entry.total += 1;
+      if (r.TumorType && r.TumorType !== "Healthy") entry.positive += 1;
+      entry.confidenceSum += Number(r.ConfidenceScore) || 0;
+    }
+    return Array.from(map.values()).map((d) => ({
+      ...d,
+      avgConfidence: d.total ? d.confidenceSum / d.total : 0,
+    }));
+  }, [rows]);
+
+  // Diagnosis split: counts per TumorType, scoped to the current view (own patients, or head's filter)
+  const diagnosisBreakdown = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of visible) {
+      const key = r.TumorType || "Healthy";
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([name, value]) => ({
+      name,
+      value,
+      color: DIAGNOSIS_COLORS[name] || "var(--color-muted-foreground)",
+    }));
+  }, [visible]);
+
+  // Scan volume: count of diagnoses per day, scoped to the current view, for the most recent 7 distinct days present
+  const scanVolume = useMemo(() => {
+    const map = new Map<string, { day: string; scans: number; positive: number }>();
+    for (const r of visible) {
+      if (!r.DiagnosisDate) continue;
+      const day = String(r.DiagnosisDate).slice(0, 10);
+      if (!map.has(day)) map.set(day, { day, scans: 0, positive: 0 });
+      const entry = map.get(day)!;
+      entry.scans += 1;
+      if (r.TumorType && r.TumorType !== "Healthy") entry.positive += 1;
+    }
+    return Array.from(map.values())
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .slice(-7);
+  }, [visible]);
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto">
@@ -133,6 +209,10 @@ function Dashboard() {
         )}
       </div>
 
+      {loading && (
+        <div className="mb-6 text-sm text-muted-foreground">Loading dashboard data…</div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {stats.map((s) => (
@@ -144,10 +224,12 @@ function Dashboard() {
               <div className={`grid h-10 w-10 place-items-center rounded-lg bg-muted ${s.tone}`}>
                 <s.icon className="h-5 w-5" />
               </div>
-              <span className="inline-flex items-center gap-0.5 text-xs font-medium text-success">
-                <ArrowUpRight className="h-3 w-3" />
-                {s.delta}
-              </span>
+              {s.delta && (
+                <span className="inline-flex items-center gap-0.5 text-xs font-medium text-success">
+                  <ArrowUpRight className="h-3 w-3" />
+                  {s.delta}
+                </span>
+              )}
             </div>
             <p className="text-2xl font-bold text-foreground">{s.value}</p>
             <p className="text-sm text-muted-foreground mt-1">{s.label}</p>
@@ -216,7 +298,7 @@ function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="font-display text-lg font-semibold">Scan Volume</h3>
-              <p className="text-xs text-muted-foreground">Last 7 days</p>
+              <p className="text-xs text-muted-foreground">Most recent days on record</p>
             </div>
             <div className="flex items-center gap-4 text-xs">
               <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" /> Total</span>
@@ -287,32 +369,38 @@ function Dashboard() {
             </Link>
           </div>
           <div className="divide-y divide-border">
-            {visible.slice(0, 5).map((p) => (
-              <Link
-                key={p.id}
-                to="/patients/$id"
-                params={{ id: p.id }}
-                className="flex items-center gap-4 px-6 py-3 hover:bg-muted/50 transition"
-              >
-                <div className="h-9 w-9 rounded-full gradient-primary grid place-items-center text-primary-foreground text-xs font-semibold shrink-0">
-                  {p.name.split(" ").map((n) => n[0]).join("")}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{p.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {p.id} · {p.scanDate}
-                    {isHead && <span className="ml-2 inline-flex items-center gap-1"><UserCircle2 className="h-3 w-3" />{p.physician}</span>}
-                  </p>
-                </div>
-                <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full border ${diagnosisTone(p.diagnosis)}`}>
-                  {p.diagnosis}
-                </span>
-                <span className="text-xs font-mono text-muted-foreground shrink-0">
-                  {p.confidence.toFixed(1)}%
-                </span>
-              </Link>
-            ))}
-            {visible.length === 0 && (
+            {[...visible]
+              .sort((a, b) => String(b.DiagnosisDate).localeCompare(String(a.DiagnosisDate)))
+              .slice(0, 5)
+              .map((p, idx) => {
+                const fullName = `${p.FirstName ?? ""} ${p.LastName ?? ""}`.trim();
+                return (
+                  <Link
+                    key={`${p.PatientID}-${p.DiagnosisDate}-${idx}`}
+                    to="/patients/$id"
+                    params={{ id: String(p.PatientID) }}
+                    className="flex items-center gap-4 px-6 py-3 hover:bg-muted/50 transition"
+                  >
+                    <div className="h-9 w-9 rounded-full gradient-primary grid place-items-center text-primary-foreground text-xs font-semibold shrink-0">
+                      {fullName.split(" ").map((n) => n[0]).join("")}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{fullName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {p.PatientID} · {String(p.DiagnosisDate).slice(0, 10)}
+                        {isHead && <span className="ml-2 inline-flex items-center gap-1"><UserCircle2 className="h-3 w-3" />{p.DoctorName}</span>}
+                      </p>
+                    </div>
+                    <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full border ${diagnosisTone(p.TumorType || "Healthy")}`}>
+                      {p.TumorType || "Healthy"}
+                    </span>
+                    <span className="text-xs font-mono text-muted-foreground shrink-0">
+                      {Number(p.ConfidenceScore).toFixed(1)}%
+                    </span>
+                  </Link>
+                );
+              })}
+            {visible.length === 0 && !loading && (
               <div className="px-6 py-10 text-center text-sm text-muted-foreground">
                 No patients assigned to you yet.
               </div>
@@ -326,7 +414,7 @@ function Dashboard() {
             {[
               { label: "AI Inference Engine", val: "Operational", ok: true },
               { label: "DICOM Parser", val: "Operational", ok: true },
-              { label: "Storage (S3)", val: "Operational", ok: true },
+              { label: "Database (SQL Server)", val: "Operational", ok: true },
               { label: "Model v3.2", val: "Active", ok: true },
             ].map((r) => (
               <div key={r.label} className="flex items-center justify-between text-sm">
@@ -337,16 +425,6 @@ function Dashboard() {
                 </span>
               </div>
             ))}
-          </div>
-          <div className="mt-5 pt-5 border-t border-border">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-              <Activity className="h-3.5 w-3.5" />
-              GPU utilization
-            </div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
-              <div className="h-full gradient-primary" style={{ width: "62%" }} />
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">62% · 4× NVIDIA A100</p>
           </div>
         </div>
       </div>
